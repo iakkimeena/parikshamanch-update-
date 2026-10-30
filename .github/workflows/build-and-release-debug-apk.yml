@@ -1,0 +1,136 @@
+name: Build & Publish Debug APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (e.g. v1.0.0)'
+        required: false
+        default: 'v1.0.0'
+      release_title:
+        description: 'Release Title'
+        required: false
+        default: 'Parikshamanch Debug APK Release'
+      publish_release:
+        description: 'Publish as GitHub Release'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build & Package Debug APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Ensure Gradlew Permissions
+        run: |
+          chmod +x ./gradlew
+
+      - name: Prepare Secrets Configuration (.env)
+        run: |
+          if [ ! -f .env ]; then
+            echo "# CI environment placeholder" > .env
+            echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
+          fi
+
+      - name: Build Debug APK
+        run: |
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Verify and Prepare APK Assets
+        id: prepare_asset
+        run: |
+          APK_SRC="app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$APK_SRC" ]; then
+            echo "Error: Debug APK was not generated at $APK_SRC"
+            exit 1
+          fi
+          
+          # Copy to branded APK name for distribution
+          ASSET_NAME="Parikshamanch-debug.apk"
+          cp "$APK_SRC" "app/build/outputs/apk/debug/$ASSET_NAME"
+          
+          echo "apk_path=app/build/outputs/apk/debug/$ASSET_NAME" >> "$GITHUB_OUTPUT"
+          echo "raw_apk_path=$APK_SRC" >> "$GITHUB_OUTPUT"
+          echo "APK generated successfully at $APK_SRC ($ASSET_NAME)"
+
+      - name: Upload Debug APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: parikshamanch-debug-apk
+          path: |
+            ${{ steps.prepare_asset.outputs.apk_path }}
+            ${{ steps.prepare_asset.outputs.raw_apk_path }}
+          retention-days: 30
+
+      - name: Determine Release Tag
+        id: release_info
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag_name }}" >> "$GITHUB_OUTPUT"
+            echo "title=${{ inputs.release_title }}" >> "$GITHUB_OUTPUT"
+            echo "should_release=${{ inputs.publish_release }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+            echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+            echo "title=Parikshamanch $TAG_NAME" >> "$GITHUB_OUTPUT"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "title=" >> "$GITHUB_OUTPUT"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish GitHub Release with APK Asset
+        if: steps.release_info.outputs.should_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_info.outputs.tag }}
+          name: ${{ steps.release_info.outputs.title }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            ${{ steps.prepare_asset.outputs.raw_apk_path }}
+            ${{ steps.prepare_asset.outputs.apk_path }}
+          body: |
+            ### 📱 Parikshamanch Debug APK
+            
+            This release contains the latest debug build of **Parikshamanch (परीक्षा मंच)** for testing and deployment.
+            
+            #### 📦 Download Assets:
+            - **Release Asset**: `app-debug.apk`
+            - **Branded Asset**: `Parikshamanch-debug.apk`
+            
+            #### 🛠 Installation Steps:
+            1. Download `Parikshamanch-debug.apk` on your Android device.
+            2. Tap the downloaded file to install.
+            3. If prompted, enable **"Install unknown apps"** for your browser / file manager.
+            4. Open the app to access both the **Student Panel** and **Admin Control Center**.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

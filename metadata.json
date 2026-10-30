@@ -1,0 +1,6 @@
+{
+  "name": "Parikshamanch",
+  "description": "Parikshamanch - Exam preparation, test series, and admin control center app.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
